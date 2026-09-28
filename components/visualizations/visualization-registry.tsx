@@ -3,58 +3,34 @@
 import type React from "react";
 // Import all visualization components from organized categories
 import {
-  ActivationFunctionVisualizer,
-  // AI/ML General visualizations
-  AITrendsVisualization,
   AssumptionPlotsVisualization,
-  AttentionMechanismDemo,
-  CNNArchitectureVisualizer,
   InteractiveDemoVisualization,
-  // Linear Regression visualizations
   LinearEquationVisualization,
   ModelEvaluationVisualization,
-  MultiModalLearningDemo,
-  NeuralNetworkDemo,
   RegressionComparisonVisualization,
-  YOLODetectionDemo,
 } from "./categories";
 import { VisualizationError, type VisualizationProps } from "./shared";
 
 /**
- * Visualization Component Registry
+ * Registry of the React visualizations that articles can embed.
  *
- * This file contains the registry of all React visualization components that can be
- * embedded in markdown content using <div id="ComponentName"></div> syntax.
+ * An article embeds one with a placeholder on its own line:
+ *   <div id="VZ-linear-equation" data-placeholder="Interactive Linear Equation"></div>
+ * The id must start with "VZ-" and match a key below; MarkdownRenderer only
+ * swaps in divs whose id starts with "VZ-".
  *
- * The components are now organized in modular categories under ./categories/
- *
- * To add a new visualization:
- * 1. Create the component in the appropriate category folder
- * 2. Export it from the category's index.ts
- * 3. Import it above and add it to the VISUALIZATION_COMPONENTS object
- * 4. The component ID in markdown should match the key in the registry
+ * To add a visualization:
+ * 1. Create the component in a folder under ./categories/
+ * 2. Export it from that folder's index.ts
+ * 3. Import it above and add it below under a new "VZ-..." key
  */
-
-// Registry of all available visualization components
 export const VISUALIZATION_COMPONENTS: Record<string, React.ComponentType> = {
-  // AI/ML General Components
-  AITrendsVisualization,
-  ActivationFunctionVisualizer,
-  NeuralNetworkDemo,
-  CNNArchitectureVisualizer,
-  YOLODetectionDemo,
-  AttentionMechanismDemo,
-  MultiModalLearningDemo,
-
-  // Linear Regression Visualizations (with VZ- prefix for consistency)
+  // Linear regression
   "VZ-linear-equation": LinearEquationVisualization,
   "VZ-assumptions-plots": AssumptionPlotsVisualization,
   "VZ-regression-comparison": RegressionComparisonVisualization,
   "VZ-model-evaluation": ModelEvaluationVisualization,
   "VZ-interactive-demo": InteractiveDemoVisualization,
-
-  // Add more visualization components here as needed
-  // The key should match the ID used in markdown: <div id="ComponentName"></div>
 };
 
 /**

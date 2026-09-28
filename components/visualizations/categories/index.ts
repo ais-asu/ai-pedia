@@ -6,5 +6,4 @@
  * embedded in markdown content.
  */
 
-export * from "./ai-ml-general";
 export * from "./linear-regression";
