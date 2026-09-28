@@ -4,7 +4,12 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ArrowRight, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { navItems } from "@/lib/constants";
+import {
+  MAP_LOCATE_EVENT,
+  type MapLocateDetail,
+  navItems,
+  OPEN_SEARCH_EVENT,
+} from "@/lib/constants";
 import type { SearchEntry } from "@/lib/content";
 import { cn } from "@/lib/utils";
 
@@ -57,8 +62,16 @@ export function CommandPalette({ index }: { index: SearchEntry[] }) {
 
   const go = useCallback(
     (entry: SearchEntry) => {
-      router.push(entry.path);
       close();
+      // On the map, the map flies to the result itself and cancels the event;
+      // anywhere else nobody is listening and we navigate as usual.
+      const flown = !window.dispatchEvent(
+        new CustomEvent<MapLocateDetail>(MAP_LOCATE_EVENT, {
+          detail: { path: entry.path },
+          cancelable: true,
+        }),
+      );
+      if (!flown) router.push(entry.path);
     },
     [router, close],
   );
@@ -73,8 +86,13 @@ export function CommandPalette({ index }: { index: SearchEntry[] }) {
         close();
       }
     };
+    const onOpenRequest = () => setOpen(true);
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener(OPEN_SEARCH_EVENT, onOpenRequest);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener(OPEN_SEARCH_EVENT, onOpenRequest);
+    };
   }, [close]);
 
   useEffect(() => {

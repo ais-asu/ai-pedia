@@ -35,8 +35,15 @@ export * from "@/lib/graph-types";
 const ORBIT = {
   category: 560,
   article: 250,
-  heading: 108,
+  heading: 132,
 } as const;
+
+/**
+ * Categories sit on an ellipse rather than a circle, wider than it is tall, so
+ * the ring matches a landscape screen and leaves the middle clear for the
+ * title card that stands over the root.
+ */
+const RING_ASPECT = 1.45;
 
 /** Drawn radius of a node at each depth; deeper headings keep shrinking. */
 const NODE_RADIUS = [34, 23, 13, 6.5, 4] as const;
@@ -74,9 +81,10 @@ function fanAngle(
   i: number,
   count: number,
   maxSpread: number,
+  perChild = 0.3,
 ): number {
   if (count <= 1) return heading;
-  const spread = Math.min(maxSpread, 0.55 + count * 0.3);
+  const spread = Math.min(maxSpread, 0.55 + count * perChild);
   return heading - spread / 2 + (spread * i) / (count - 1);
 }
 
@@ -97,7 +105,8 @@ function placeHeading(
   href: string,
 ): void {
   const id = `${parent.id}#${headingNode.id}`;
-  const angle = fanAngle(outward, index, siblings, Math.PI * 0.85);
+  // Section labels are long, so siblings get a wider arc than articles do.
+  const angle = fanAngle(outward, index, siblings, Math.PI * 1.15, 0.45);
   const wobble = jitter(id, "angle") * 0.1;
   const distance = ORBIT.heading * (1 + jitter(id, "dist") * 0.18);
   const theta = angle + wobble;
@@ -155,7 +164,13 @@ function placeArticle(
   out.edges.push({ from: category.id, to: node.id, kind: "tree" });
 
   const article = getArticle(meta.category, meta.slug);
-  const headings = article?.headings ?? [];
+  let headings = article?.headings ?? [];
+  // Most articles open with an H1 that repeats their title. As a node it would
+  // sit on top of the article's own label and push every real section a level
+  // deeper, so its sections are promoted in its place.
+  if (headings.length === 1 && headings[0].level === 1) {
+    headings = headings[0].children;
+  }
   headings.forEach((h, i) => {
     placeHeading(out, node, h, i, headings.length, theta, 3, href);
   });
@@ -169,8 +184,10 @@ function placeCategory(
   siblings: number,
 ): GraphNode {
   const id = `category:${category.slug}`;
-  // Categories ring the root evenly, starting at the top of the circle.
-  const angle = -Math.PI / 2 + (Math.PI * 2 * index) / Math.max(siblings, 1);
+  // Categories ring the root evenly, turned half a step off the vertical so
+  // none of them sits directly above or below the title card.
+  const step = (Math.PI * 2) / Math.max(siblings, 1);
+  const angle = -Math.PI / 2 + step / 2 + step * index;
   const theta = angle + jitter(id, "angle") * 0.07;
   const distance = ORBIT.category * (1 + jitter(id, "dist") * 0.14);
 
@@ -182,7 +199,7 @@ function placeCategory(
     href: `/learn/${category.slug}`,
     parent: root.id,
     depth: 1,
-    x: root.x + Math.cos(theta) * distance,
+    x: root.x + Math.cos(theta) * distance * RING_ASPECT,
     y: root.y + Math.sin(theta) * distance,
     r: radiusFor(1),
   };
@@ -228,10 +245,6 @@ export const getGraph = cache((): GraphData => {
 
   const out: Placement = { nodes: [root], edges: [] };
   const categories = getCategories();
-  root.sublabel =
-    categories.length === 1
-      ? "1 branch · click to fly in"
-      : `${categories.length} branches · click to fly in`;
   const categoryNodes = categories.map((c, i) =>
     placeCategory(out, root, c, i, categories.length),
   );
@@ -248,6 +261,5 @@ export const getGraph = cache((): GraphData => {
     nodes: out.nodes,
     edges: out.edges,
     bounds: boundsOf(out.nodes),
-    overview: boundsOf(out.nodes.filter((n) => n.depth <= 1)),
   };
 });

@@ -3,23 +3,31 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  MAP_LOCATE_EVENT,
+  type MapLocateDetail,
+  OPEN_SEARCH_EVENT,
+} from "@/lib/constants";
 import type { GraphData, GraphEdge, GraphNode } from "@/lib/graph-types";
 import { ROOT_ID } from "@/lib/graph-types";
 import { drawField, type FieldStyle } from "./ambient-field";
 import {
-  blend,
   type Camera,
   clamp,
   clampCamera,
-  easeOut,
-  fitCamera,
+  damp,
+  type Flight,
+  flightPath,
   focusScaleFor,
+  lerp,
   levelFor,
   MAX_K,
   MIN_K,
+  openingCamera,
   toWorld,
   transformFor,
 } from "./camera";
+import { MapHero, type MapStats } from "./map-hero";
 
 /**
  * The panel drags in the whole markdown stack — react-markdown, KaTeX, the
@@ -45,6 +53,35 @@ interface Size {
 interface OpenArticle {
   href: string;
   anchor?: string;
+}
+
+/** A wheel zoom in progress: glide towards `k`, holding a world point under the cursor. */
+interface ZoomGlide {
+  k: number;
+  px: number;
+  py: number;
+  wx: number;
+  wy: number;
+}
+
+/** Response time of the wheel glide, in ms. Lower is snappier. */
+const ZOOM_TAU = 105;
+/** How quickly a flung pan loses speed, in ms. */
+const FLING_TAU = 300;
+/** A single wheel notch never zooms by more than this factor. */
+const WHEEL_STEP_MAX = 1.35;
+
+/**
+ * Wheel deltas come in pixels, lines or pages depending on the browser and the
+ * device. Normalized to pixels, so a mouse notch and a trackpad swipe land on
+ * the same scale before they are turned into zoom.
+ */
+function wheelPixels(
+  event: WheelEvent,
+  pageH: number,
+): { x: number; y: number } {
+  const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? pageH : 1;
+  return { x: event.deltaX * unit, y: event.deltaY * unit };
 }
 
 function labelSize(depth: number): number {
@@ -77,24 +114,44 @@ function bowFor(id: string): number {
 
 export function NeuralGraph({ graph }: { graph: GraphData }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const fieldStyleRef = useRef<FieldStyle>({ ink: "#191918", line: "#e3e0d6" });
+  const fieldStyleRef = useRef<FieldStyle>({
+    ink: "#191918",
+    line: "#6f6d66",
+    accent: "#8f84d6",
+  });
   const svgRef = useRef<SVGSVGElement | null>(null);
   const worldRef = useRef<SVGGElement | null>(null);
+  const heroRef = useRef<HTMLDivElement | null>(null);
   const sizeRef = useRef<Size>({ w: 0, h: 0 });
 
   const camRef = useRef<Camera>({ cx: 0, cy: 0, k: 0.5, ox: 0 });
-  /** Scale of the opening framing; every zoom threshold is relative to it. */
+  /** The opening shot. Every zoom threshold is relative to its scale. */
+  const homeRef = useRef<Camera>({ cx: 0, cy: 0, k: 0.5, ox: 0 });
   const baseKRef = useRef(0.5);
-  const animRef = useRef<{
-    from: Camera;
-    to: Camera;
+
+  // Camera motion. At most one of these drives the camera on a given frame,
+  // in this order of precedence; any direct input cancels the others.
+  const flightRef = useRef<{
+    flight: Flight;
     start: number;
-    dur: number;
+    done?: () => void;
   } | null>(null);
-  const rafRef = useRef<number | null>(null);
+  const glideRef = useRef<ZoomGlide | null>(null);
+  const flingRef = useRef<{ vx: number; vy: number } | null>(null);
+  /** Set whenever the camera moved, so the loop knows to repaint the field. */
+  const dirtyRef = useRef(true);
+  const reducedRef = useRef(false);
 
   const pointersRef = useRef(new Map<number, { x: number; y: number }>());
-  const dragRef = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const dragRef = useRef<{
+    x: number;
+    y: number;
+    moved: boolean;
+    /** Smoothed pointer velocity in px/ms, for flinging on release. */
+    vx: number;
+    vy: number;
+    t: number;
+  } | null>(null);
   const pinchRef = useRef<number | null>(null);
   const capturedRef = useRef(new Set<number>());
 
@@ -149,10 +206,25 @@ export function NeuralGraph({ graph }: { graph: GraphData }) {
     [hoverId, activeId, lineageOf],
   );
 
+  const stats = useMemo<MapStats>(() => {
+    const count = (kind: GraphNode["kind"]) =>
+      graph.nodes.filter((n) => n.kind === kind).length;
+    return {
+      categories: count("category"),
+      articles: count("article"),
+      sections: count("heading"),
+    };
+  }, [graph.nodes]);
+
+  const categoryNodes = useMemo(
+    () => graph.nodes.filter((n) => n.kind === "category"),
+    [graph.nodes],
+  );
+
   // ---------------------------------------------------------------- camera
 
-  /** Repaints the procedural mesh for the current camera. */
-  const paintField = useCallback(() => {
+  /** Repaints the procedural mesh for the current camera at time `t` (s). */
+  const paintField = useCallback((t: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -166,7 +238,28 @@ export function NeuralGraph({ graph }: { graph: GraphData }) {
       canvas.height = pixelH;
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawField(ctx, w, h, camRef.current, fieldStyleRef.current);
+    drawField(ctx, w, h, camRef.current, fieldStyleRef.current, t);
+  }, []);
+
+  /**
+   * Pins the title card to the root. It grows and shrinks with the zoom, but
+   * less than the map does, and fades out once you are well past it.
+   */
+  const placeHero = useCallback(() => {
+    const hero = heroRef.current;
+    if (!hero) return;
+    const { w, h } = sizeRef.current;
+    const cam = camRef.current;
+    const x = w / 2 + cam.ox - cam.cx * cam.k;
+    const y = h / 2 - cam.cy * cam.k;
+    const ratio = cam.k / Math.max(baseKRef.current, 1e-6);
+    const scale = clamp(ratio, 0.45, 2.4) ** 0.6;
+    const opacity = clamp((1.75 - ratio) / 0.55, 0, 1);
+    hero.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(
+      1,
+    )}px) translate(-50%, -50%) scale(${scale.toFixed(4)})`;
+    hero.style.opacity = opacity.toFixed(3);
+    hero.style.visibility = opacity < 0.02 ? "hidden" : "visible";
   }, []);
 
   const applyCamera = useCallback(() => {
@@ -177,28 +270,9 @@ export function NeuralGraph({ graph }: { graph: GraphData }) {
     world.setAttribute("transform", transformFor(camRef.current, w, h));
     const level = String(levelFor(camRef.current.k, baseKRef.current));
     if (svg.dataset.zoom !== level) svg.dataset.zoom = level;
-    paintField();
-  }, [paintField]);
-
-  const tick = useCallback(
-    (now: number) => {
-      const anim = animRef.current;
-      if (!anim) {
-        rafRef.current = null;
-        return;
-      }
-      const t = Math.min(1, (now - anim.start) / anim.dur);
-      camRef.current = blend(anim.from, anim.to, easeOut(t));
-      applyCamera();
-      if (t >= 1) {
-        animRef.current = null;
-        rafRef.current = null;
-        return;
-      }
-      rafRef.current = requestAnimationFrame(tick);
-    },
-    [applyCamera],
-  );
+    placeHero();
+    dirtyRef.current = true;
+  }, [placeHero]);
 
   const tether = useCallback(
     (cam: Camera): Camera => {
@@ -208,33 +282,75 @@ export function NeuralGraph({ graph }: { graph: GraphData }) {
     [graph.bounds],
   );
 
+  /** Stops every glide, fling and flight in progress. */
+  const halt = useCallback(() => {
+    flightRef.current = null;
+    glideRef.current = null;
+    flingRef.current = null;
+  }, []);
+
+  /** Flies the camera to `to`, then calls `done` once it has arrived. */
   const animateTo = useCallback(
-    (to: Partial<Camera>, dur = 760) => {
+    (to: Partial<Camera>, done?: () => void) => {
       const from = { ...camRef.current };
       const next = tether({ ...from, ...to });
-      if (
-        window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ||
-        dur === 0
-      ) {
-        animRef.current = null;
+      halt();
+      if (reducedRef.current) {
         camRef.current = next;
         applyCamera();
+        done?.();
         return;
       }
-      animRef.current = { from, to: next, start: performance.now(), dur };
-      if (rafRef.current === null) rafRef.current = requestAnimationFrame(tick);
+      flightRef.current = {
+        flight: flightPath(from, next, sizeRef.current.w || 1000),
+        start: performance.now(),
+        done,
+      };
     },
-    [applyCamera, tether, tick],
+    [applyCamera, halt, tether],
   );
 
-  /** Stops any running flight and moves the camera immediately. */
+  /** Stops any running motion and moves the camera immediately. */
   const setCamera = useCallback(
     (next: Camera) => {
-      animRef.current = null;
+      halt();
       camRef.current = tether(next);
       applyCamera();
     },
-    [applyCamera, tether],
+    [applyCamera, halt, tether],
+  );
+
+  /**
+   * Starts (or extends) a smooth zoom towards `k`, keeping the world point
+   * under screen position (`px`, `py`) fixed. Successive wheel events keep
+   * pushing the same target, so a burst of notches reads as one gesture.
+   */
+  const glideZoom = useCallback(
+    (factor: number, px: number, py: number) => {
+      const { w, h } = sizeRef.current;
+      const cam = camRef.current;
+      flightRef.current = null;
+      flingRef.current = null;
+      const from = glideRef.current?.k ?? cam.k;
+      const base = baseKRef.current;
+      const k = clamp(
+        clamp(from * factor, base * 0.4, base * 12),
+        MIN_K,
+        MAX_K,
+      );
+      const world = toWorld(cam, w, h, px, py);
+      if (reducedRef.current) {
+        setCamera({
+          ...cam,
+          k,
+          cx: world.x - (px - w / 2 - cam.ox) / k,
+          cy: world.y - (py - h / 2) / k,
+        });
+        return;
+      }
+      glideRef.current = { k, px, py, wx: world.x, wy: world.y };
+    },
+    [setCamera],
   );
 
   /** Screen-space sideways shift that keeps a focused node clear of the panel. */
@@ -244,14 +360,10 @@ export function NeuralGraph({ graph }: { graph: GraphData }) {
     return -Math.min(760, w * 0.52) / 2;
   }, []);
 
-  const resetView = useCallback(
-    (dur = 760) => {
-      const { w, h } = sizeRef.current;
-      if (!w || !h) return;
-      animateTo(fitCamera(graph.overview, w, h), dur);
-    },
-    [animateTo, graph.overview],
-  );
+  const resetView = useCallback(() => {
+    if (!sizeRef.current.w) return;
+    animateTo(homeRef.current);
+  }, [animateTo]);
 
   // ------------------------------------------------------------- selection
 
@@ -261,7 +373,7 @@ export function NeuralGraph({ graph }: { graph: GraphData }) {
   }, [animateTo]);
 
   const selectNode = useCallback(
-    (node: GraphNode) => {
+    (node: GraphNode, { openOnArrival = false } = {}) => {
       setActiveId(node.id);
 
       if (node.id === ROOT_ID) {
@@ -285,16 +397,60 @@ export function NeuralGraph({ graph }: { graph: GraphData }) {
 
       if (!node.href) return;
       const next: OpenArticle = { href: node.href, anchor: node.anchor };
-      setOpen(next);
-      animateTo({
-        cx: node.x,
-        cy: node.y,
-        k: focusScaleFor(node, baseKRef.current),
-        ox: panelOffset(true),
-      });
+      // From search the journey can cross the whole map, so the panel waits
+      // for the camera to land rather than covering half the flight.
+      if (!openOnArrival) setOpen(next);
+      animateTo(
+        {
+          cx: node.x,
+          cy: node.y,
+          k: focusScaleFor(node, baseKRef.current),
+          ox: panelOffset(true),
+        },
+        openOnArrival ? () => setOpen(next) : undefined,
+      );
     },
     [animateTo, panelOffset, resetView],
   );
+
+  /** Flies to whatever the search palette picked, if it is on the map. */
+  const locate = useCallback(
+    (path: string): boolean => {
+      if (path === "/" || path === "/learn") {
+        setActiveId(null);
+        setOpen(null);
+        resetView();
+        return true;
+      }
+      const node = graph.nodes.find(
+        (n) =>
+          n.href === path && (n.kind === "category" || n.kind === "article"),
+      );
+      if (!node) return false;
+      selectNode(node, { openOnArrival: true });
+      return true;
+    },
+    [graph.nodes, resetView, selectNode],
+  );
+
+  const locateRef = useRef(locate);
+  locateRef.current = locate;
+
+  useEffect(() => {
+    const onLocate = (event: Event) => {
+      const { path } = (event as CustomEvent<MapLocateDetail>).detail;
+      if (locateRef.current(path)) event.preventDefault();
+    };
+    window.addEventListener(MAP_LOCATE_EVENT, onLocate);
+    return () => window.removeEventListener(MAP_LOCATE_EVENT, onLocate);
+  }, []);
+
+  const explore = useCallback(() => {
+    const first =
+      categoryNodes.find((c) => graph.nodes.some((n) => n.parent === c.id)) ??
+      categoryNodes[0];
+    if (first) selectNode(first);
+  }, [categoryNodes, graph.nodes, selectNode]);
 
   // --------------------------------------------------------------- sizing
 
@@ -305,7 +461,8 @@ export function NeuralGraph({ graph }: { graph: GraphData }) {
     const styles = getComputedStyle(svg);
     fieldStyleRef.current = {
       ink: styles.getPropertyValue("--foreground").trim() || "#191918",
-      line: styles.getPropertyValue("--line").trim() || "#e3e0d6",
+      line: styles.getPropertyValue("--muted").trim() || "#6f6d66",
+      accent: styles.getPropertyValue("--purple").trim() || "#8f84d6",
     };
 
     const measure = () => {
@@ -313,10 +470,11 @@ export function NeuralGraph({ graph }: { graph: GraphData }) {
       if (rect.width === 0) return;
       const first = sizeRef.current.w === 0;
       sizeRef.current = { w: rect.width, h: rect.height };
-      const fit = fitCamera(graph.overview, rect.width, rect.height);
-      baseKRef.current = fit.k;
+      const home = openingCamera(categoryNodes, rect.width, rect.height);
+      homeRef.current = home;
+      baseKRef.current = home.k;
       if (first) {
-        setCamera(fit);
+        setCamera(home);
         setReady(true);
       } else {
         applyCamera();
@@ -327,7 +485,94 @@ export function NeuralGraph({ graph }: { graph: GraphData }) {
     const observer = new ResizeObserver(measure);
     observer.observe(svg);
     return () => observer.disconnect();
-  }, [applyCamera, setCamera, graph.overview]);
+  }, [applyCamera, setCamera, categoryNodes]);
+
+  // --------------------------------------------------------- motion loop
+
+  /**
+   * One loop drives everything that moves: flights, wheel glides, flings and
+   * the drifting field. The field keeps animating while the camera is still,
+   * unless the visitor has asked for reduced motion, in which case the loop
+   * only repaints when the camera actually moves.
+   */
+  useEffect(() => {
+    const media = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    reducedRef.current = media?.matches ?? false;
+    const onMotionPref = () => {
+      reducedRef.current = media?.matches ?? false;
+      dirtyRef.current = true;
+    };
+    media?.addEventListener("change", onMotionPref);
+
+    let last = performance.now();
+    let raf = 0;
+
+    const step = (now: number, dt: number) => {
+      const flight = flightRef.current;
+      if (flight) {
+        const t = Math.min(1, (now - flight.start) / flight.flight.duration);
+        camRef.current = flight.flight.at(t);
+        applyCamera();
+        if (t >= 1) {
+          flightRef.current = null;
+          flight.done?.();
+        }
+        return;
+      }
+
+      const glide = glideRef.current;
+      if (glide) {
+        const { w, h } = sizeRef.current;
+        const cam = camRef.current;
+        const a = damp(dt, ZOOM_TAU);
+        const logK = lerp(Math.log(cam.k), Math.log(glide.k), a);
+        const settled = Math.abs(logK - Math.log(glide.k)) < 0.0015;
+        const k = settled ? glide.k : Math.exp(logK);
+        camRef.current = tether({
+          k,
+          ox: cam.ox,
+          cx: glide.wx - (glide.px - w / 2 - cam.ox) / k,
+          cy: glide.wy - (glide.py - h / 2) / k,
+        });
+        applyCamera();
+        if (settled) glideRef.current = null;
+        return;
+      }
+
+      const fling = flingRef.current;
+      if (fling) {
+        const cam = camRef.current;
+        camRef.current = tether({
+          ...cam,
+          cx: cam.cx - (fling.vx * dt) / cam.k,
+          cy: cam.cy - (fling.vy * dt) / cam.k,
+        });
+        applyCamera();
+        const decay = Math.exp(-dt / FLING_TAU);
+        fling.vx *= decay;
+        fling.vy *= decay;
+        if (Math.hypot(fling.vx, fling.vy) < 0.015) flingRef.current = null;
+      }
+    };
+
+    const frame = (now: number) => {
+      const dt = Math.min(48, now - last);
+      last = now;
+      step(now, dt);
+      const animated = !reducedRef.current;
+      if (animated || dirtyRef.current) {
+        dirtyRef.current = false;
+        paintField(animated ? now / 1000 : 0);
+      }
+      raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      media?.removeEventListener("change", onMotionPref);
+    };
+  }, [applyCamera, paintField, tether]);
 
   // ----------------------------------------------------------- wheel zoom
 
@@ -338,30 +583,30 @@ export function NeuralGraph({ graph }: { graph: GraphData }) {
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
       const rect = svg.getBoundingClientRect();
-      const px = event.clientX - rect.left;
-      const py = event.clientY - rect.top;
-      const { w, h } = sizeRef.current;
-      const cam = camRef.current;
+      const delta = wheelPixels(event, rect.height);
 
-      // Trackpad pinch arrives as a ctrl-modified wheel with small deltas.
-      const intensity = event.ctrlKey ? 0.01 : 0.0022;
-      const k = clamp(
-        cam.k * Math.exp(-event.deltaY * intensity),
-        MIN_K,
-        MAX_K,
+      // A sideways swipe on a trackpad pans; everything else zooms.
+      if (!event.ctrlKey && Math.abs(delta.x) > Math.abs(delta.y)) {
+        const cam = camRef.current;
+        setCamera({ ...cam, cx: cam.cx + delta.x / cam.k });
+        return;
+      }
+
+      // Pinch arrives as a ctrl-modified wheel with small, frequent deltas; a
+      // mouse notch as one large one. Both are capped so no single event can
+      // jump, and the glide in the loop smooths out whatever arrives.
+      const exponent = event.ctrlKey ? -delta.y * 0.011 : -delta.y * 0.0026;
+      const cap = Math.log(WHEEL_STEP_MAX);
+      glideZoom(
+        Math.exp(clamp(exponent, -cap, cap)),
+        event.clientX - rect.left,
+        event.clientY - rect.top,
       );
-      const anchor = toWorld(cam, w, h, px, py);
-      setCamera({
-        k,
-        ox: cam.ox,
-        cx: anchor.x - (px - w / 2 - cam.ox) / k,
-        cy: anchor.y - (py - h / 2) / k,
-      });
     };
 
     svg.addEventListener("wheel", onWheel, { passive: false });
     return () => svg.removeEventListener("wheel", onWheel);
-  }, [setCamera]);
+  }, [glideZoom, setCamera]);
 
   // ------------------------------------------------------- pan and pinch
 
@@ -383,8 +628,18 @@ export function NeuralGraph({ graph }: { graph: GraphData }) {
         x: event.clientX,
         y: event.clientY,
       });
+      // Catching the map mid-fling or mid-glide stops it, like a hand on a page.
+      glideRef.current = null;
+      flingRef.current = null;
       if (pointersRef.current.size === 1) {
-        dragRef.current = { x: event.clientX, y: event.clientY, moved: false };
+        dragRef.current = {
+          x: event.clientX,
+          y: event.clientY,
+          moved: false,
+          vx: 0,
+          vy: 0,
+          t: performance.now(),
+        };
       } else {
         dragRef.current = null;
         pinchRef.current = null;
@@ -433,6 +688,11 @@ export function NeuralGraph({ graph }: { graph: GraphData }) {
       if (!drag.moved && Math.hypot(dx, dy) < 4) return;
       drag.moved = true;
       capture(event.pointerId);
+      const now = performance.now();
+      const elapsed = Math.max(1, now - drag.t);
+      drag.vx = lerp(drag.vx, dx / elapsed, 0.6);
+      drag.vy = lerp(drag.vy, dy / elapsed, 0.6);
+      drag.t = now;
       drag.x = event.clientX;
       drag.y = event.clientY;
       const cam = camRef.current;
@@ -453,8 +713,17 @@ export function NeuralGraph({ graph }: { graph: GraphData }) {
     pointersRef.current.delete(event.pointerId);
     if (pointersRef.current.size < 2) pinchRef.current = null;
     if (pointersRef.current.size === 0) {
-      // Cleared on the next frame so the click that follows can read it.
       const drag = dragRef.current;
+      // A drag released while still moving carries on and coasts to a stop.
+      if (
+        drag?.moved &&
+        !reducedRef.current &&
+        performance.now() - drag.t < 70 &&
+        Math.hypot(drag.vx, drag.vy) > 0.08
+      ) {
+        flingRef.current = { vx: drag.vx, vy: drag.vy };
+      }
+      // Cleared on the next frame so the click that follows can read it.
       requestAnimationFrame(() => {
         if (dragRef.current === drag) dragRef.current = null;
       });
@@ -481,12 +750,6 @@ export function NeuralGraph({ graph }: { graph: GraphData }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, activeId, closePanel, resetView]);
 
-  useEffect(() => {
-    return () => {
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-    };
-  }, []);
-
   // ---------------------------------------------------------------- render
 
   const dimmed = highlight.size > 1;
@@ -500,6 +763,7 @@ export function NeuralGraph({ graph }: { graph: GraphData }) {
         ref={canvasRef}
         className="pointer-events-none absolute inset-0 h-full w-full"
       />
+      <div className="ngraph-edge-vignette" aria-hidden="true" />
       <svg
         ref={svgRef}
         className="ngraph relative h-full w-full touch-none select-none"
@@ -601,6 +865,18 @@ export function NeuralGraph({ graph }: { graph: GraphData }) {
         </g>
       </svg>
 
+      <div
+        className="pointer-events-none absolute inset-0 z-10 overflow-hidden transition-opacity duration-500"
+        style={{ opacity: ready && !open ? 1 : 0 }}
+      >
+        <MapHero
+          ref={heroRef}
+          stats={stats}
+          onExplore={explore}
+          onSearch={() => window.dispatchEvent(new Event(OPEN_SEARCH_EVENT))}
+        />
+      </div>
+
       {/* Real links for keyboard users, screen readers and crawlers — the
           canvas above is decorative as far as assistive tech is concerned. */}
       <nav className="sr-only" aria-label="All topics">
@@ -624,8 +900,8 @@ export function NeuralGraph({ graph }: { graph: GraphData }) {
           resetView();
         }}
         onZoom={(factor) => {
-          const cam = camRef.current;
-          animateTo({ k: clamp(cam.k * factor, MIN_K, MAX_K) }, 280);
+          const { w, h } = sizeRef.current;
+          glideZoom(factor, w / 2 + camRef.current.ox, h / 2);
         }}
       />
 
