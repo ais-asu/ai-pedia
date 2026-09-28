@@ -126,8 +126,10 @@ dependency that another package pins, add it under `overrides` in
 
 **Releases.** Releases are tagged on GitHub as `vMAJOR.MINOR.PATCH` and noted in
 [CHANGELOG.md](CHANGELOG.md). Deploys don't depend on releases; a tag just marks
-a known-good state. To cut one, bump `version` in `package.json`, add a
-CHANGELOG entry, merge, then create the GitHub release from `main`.
+a known-good state. To cut one, bump `version` in `package.json` and add a
+matching `## X.Y.Z` section to CHANGELOG.md in the same pull request. When it
+merges, `.github/workflows/release.yml` creates the tag and the GitHub release,
+using that section as the notes.
 
 ## License
 
