@@ -2,7 +2,7 @@
 
 AI Pedia is a collection of Markdown articles. Anyone can propose a change
 through a pull request, and a maintainer from The AI Society reviews and merges
-it. Once it's merged, the change is live within a few minutes.
+it. Merged changes go live with the next deploy.
 
 Contents: [fix an article](#fix-an-article) ·
 [write a new article](#write-a-new-article) ·
@@ -45,8 +45,8 @@ Typos, broken links and wrong formulas are welcome and usually merged quickly.
    Your article in Markdown.
    ```
 
-4. Preview it (see [Preview locally](#preview-locally)), or skip that and use
-   the preview link the pull request gets.
+4. Preview it locally (see [Preview locally](#preview-locally)). If you can't,
+   say so in the pull request and a maintainer will check it.
 5. Open a pull request. The title can simply be "Add article: Logistic
    Regression".
 
@@ -60,9 +60,6 @@ npm install
 npm run dev       # open http://localhost:3000/learn/<category>/<slug>
 npm run build     # optional, fails if any frontmatter is malformed
 ```
-
-Every pull request also gets a preview deploy. Its link appears in the PR once
-the check finishes.
 
 ## Frontmatter reference
 

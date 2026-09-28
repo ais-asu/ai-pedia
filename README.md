@@ -105,18 +105,18 @@ docs/                       Source artwork for the map
 
 ## Maintaining
 
-**Hosting.** The site is hosted on Vercel through its GitHub integration. Every
-push to `main` deploys to production, and every pull request gets a preview URL.
-The Vercel project and the `ai-pedia.ais-asu.com` domain are managed from the
-AI Society Vercel account, not from this repository. There are no secrets. Set
-`NEXT_PUBLIC_SITE_URL` in Vercel if the domain ever changes.
+**Hosting.** The site is a standard Next.js app: `npm run build` then
+`npm start`, on Node 22, with no secrets and no database. It runs on Vercel or
+any Node host. Hosting and the `ai-pedia.ais-asu.com` domain are configured
+outside this repository. Set `NEXT_PUBLIC_SITE_URL` on the host if the domain
+ever changes.
 
-**Reviewing pull requests.** For content, check the rendered page on the Vercel
-preview, not just the diff. For code, CI must be green.
+**Reviewing pull requests.** For content, check out the branch and look at the
+rendered page with `npm run dev`, not just the diff. For code, CI must be green.
 
 **Dependencies.** Dependabot opens grouped update PRs every Monday. Minor and
 patch updates can be merged once CI is green. For major updates (Next.js,
-React, lucide-react), check the preview deploy by hand first.
+React, lucide-react), run the site locally and click through the map and an article first.
 
 **Security.** `.github/workflows/security-audit.yml` runs `npm audit` every
 Monday and fails on high or critical advisories. When it fails, run
