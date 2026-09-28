@@ -22,6 +22,19 @@ export const colors = {
   purpleDeep: "#5b4fb3",
 };
 
+/**
+ * Window events that let the search palette talk to the map without either one
+ * importing the other. `MAP_LOCATE_EVENT` is cancelable: the map cancels it when
+ * it can fly to the requested path itself, and the palette only navigates when
+ * nobody did.
+ */
+export const MAP_LOCATE_EVENT = "ai-pedia:locate";
+export const OPEN_SEARCH_EVENT = "ai-pedia:open-search";
+
+export interface MapLocateDetail {
+  path: string;
+}
+
 // navigation items
 export const navItems: NavItem[] = [
   {

@@ -87,8 +87,18 @@ export function ArticlePanel({
       body.scrollTo({ top: 0 });
       return;
     }
-    const target = body.querySelector(`#${CSS.escape(anchor)}`);
-    target?.scrollIntoView({ block: "start", behavior: "smooth" });
+    const target = body.querySelector<HTMLElement>(`#${CSS.escape(anchor)}`);
+    if (!target) return;
+    // Scroll the panel body alone. scrollIntoView would also scroll every
+    // ancestor that can move — including the overflow-hidden map stage — and
+    // when a short section cannot reach the top of the panel, the difference
+    // was taken out of the stage, sliding the whole map half off the screen.
+    const top =
+      target.getBoundingClientRect().top -
+      body.getBoundingClientRect().top +
+      body.scrollTop -
+      24;
+    body.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
   }, [article, anchor]);
 
   return (

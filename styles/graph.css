@@ -194,6 +194,80 @@
   fill-opacity: 0;
 }
 
+/* The root is drawn by the title card that stands over it (see map-hero.tsx);
+   in the SVG it is only a click target and the point the branches meet. */
+.ngraph [data-kind="root"] .ngraph-dot,
+.ngraph [data-kind="root"] .ngraph-label,
+.ngraph [data-kind="root"] .ngraph-sublabel {
+  display: none;
+}
+
+/* -------------------------------------------------------------------- hero */
+
+.ngraph-hero {
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform, opacity;
+  transform-origin: 0 0;
+}
+
+/* A pool of clean paper under the title, so the branches and the mesh fade
+   out as they reach it instead of running through the type. */
+.ngraph-hero-vignette {
+  position: absolute;
+  inset: -48% -38%;
+  background: radial-gradient(
+    closest-side,
+    var(--background) 0%,
+    var(--background) 52%,
+    color-mix(in oklab, var(--background) 78%, transparent) 72%,
+    transparent 100%
+  );
+}
+
+/* A faint lavender bloom behind the wordmark — the one warm spot on the map. */
+.ngraph-hero-glow {
+  position: absolute;
+  top: 30%;
+  left: 50%;
+  width: 420px;
+  height: 180px;
+  translate: -50% -50%;
+  border-radius: 50%;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in oklab, var(--purple-light) 45%, transparent),
+    transparent
+  );
+  filter: blur(18px);
+}
+
+/* Darkens the edges of the map a touch, which pulls the eye to the middle. */
+.ngraph-edge-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 75% 70% at 50% 50%,
+    transparent 55%,
+    color-mix(in oklab, var(--surface-2) 75%, transparent) 100%
+  );
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ngraph-hero-glow {
+    animation: ngraph-breathe 7s ease-in-out infinite;
+  }
+}
+
+@keyframes ngraph-breathe {
+  50% {
+    opacity: 0.55;
+    scale: 1.08;
+  }
+}
+
 /* ------------------------------------------------------------------- panel */
 
 .ngraph-panel {
