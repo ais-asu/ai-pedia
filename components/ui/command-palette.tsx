@@ -8,7 +8,6 @@ import {
   MAP_LOCATE_EVENT,
   type MapLocateDetail,
   navItems,
-  OPEN_SEARCH_EVENT,
 } from "@/lib/constants";
 import type { SearchEntry } from "@/lib/content";
 import { cn } from "@/lib/utils";
@@ -86,13 +85,8 @@ export function CommandPalette({ index }: { index: SearchEntry[] }) {
         close();
       }
     };
-    const onOpenRequest = () => setOpen(true);
     window.addEventListener("keydown", onKey);
-    window.addEventListener(OPEN_SEARCH_EVENT, onOpenRequest);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener(OPEN_SEARCH_EVENT, onOpenRequest);
-    };
+    return () => window.removeEventListener("keydown", onKey);
   }, [close]);
 
   useEffect(() => {
