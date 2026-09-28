@@ -3,7 +3,7 @@ import { getGraph } from "@/lib/graph";
 
 export default function LearnPage() {
   return (
-    <main className="h-[calc(100svh-3rem)] overflow-hidden bg-background">
+    <main data-theme="space" className="h-svh overflow-hidden">
       <GraphStage graph={getGraph()} />
     </main>
   );

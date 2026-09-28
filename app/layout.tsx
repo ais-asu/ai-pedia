@@ -1,5 +1,11 @@
 import type { Metadata } from "next";
-import { EB_Garamond, Geist_Mono, Source_Serif_4 } from "next/font/google";
+import {
+  EB_Garamond,
+  Geist_Mono,
+  JetBrains_Mono,
+  Source_Serif_4,
+  Space_Grotesk,
+} from "next/font/google";
 import { Navbar } from "@/components/ui/navbar";
 import { PageActionsProvider } from "@/components/ui/page-actions";
 import { getSearchIndex } from "@/lib/content";
@@ -24,6 +30,17 @@ const bodyFont = Source_Serif_4({
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
+
+// The map's space theme (see [data-theme="space"] in globals.css).
+const groteskFont = Space_Grotesk({
+  variable: "--font-grotesk",
+  subsets: ["latin"],
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-jetbrains",
   subsets: ["latin"],
 });
 
@@ -124,7 +141,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${displayFont.variable} ${bodyFont.variable} ${geistMono.variable}`}
+      className={`${displayFont.variable} ${bodyFont.variable} ${geistMono.variable} ${groteskFont.variable} ${jetbrainsMono.variable}`}
     >
       <head>
         <script

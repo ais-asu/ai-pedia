@@ -1,6 +1,9 @@
 import type React from "react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
+import {
+  oneDark,
+  oneLight,
+} from "react-syntax-highlighter/dist/esm/styles/prism";
 import type {
   Notebook,
   NotebookCodeCell,
@@ -10,6 +13,8 @@ import MarkdownRenderer from "./MarkdownRenderer";
 
 interface NotebookRendererProps {
   notebook: Notebook;
+  /** Highlight code for a dark surface (the map's reading panel). */
+  dark?: boolean;
 }
 
 function Output({ output }: { output: NotebookOutput }) {
@@ -38,14 +43,14 @@ function Output({ output }: { output: NotebookOutput }) {
   }
 }
 
-function CodeCell({ cell }: { cell: NotebookCodeCell }) {
+function CodeCell({ cell, dark }: { cell: NotebookCodeCell; dark: boolean }) {
   return (
     <div className="notebook-cell notebook-cell-code">
       {cell.source.trim() && (
         <div className="notebook-source">
           <SyntaxHighlighter
             language={cell.language}
-            style={oneLight}
+            style={dark ? oneDark : oneLight}
             showLineNumbers={cell.source.trim().includes("\n")}
             customStyle={{
               margin: 0,
@@ -81,7 +86,10 @@ function CodeCell({ cell }: { cell: NotebookCodeCell }) {
   );
 }
 
-const NotebookRenderer: React.FC<NotebookRendererProps> = ({ notebook }) => {
+const NotebookRenderer: React.FC<NotebookRendererProps> = ({
+  notebook,
+  dark = false,
+}) => {
   return (
     <div className="notebook">
       {notebook.cells.map((cell, i) =>
@@ -91,11 +99,11 @@ const NotebookRenderer: React.FC<NotebookRendererProps> = ({ notebook }) => {
             // biome-ignore lint/suspicious/noArrayIndexKey: cells are a fixed build-time list with no stable id
             key={i}
           >
-            <MarkdownRenderer content={cell.source} />
+            <MarkdownRenderer content={cell.source} dark={dark} />
           </div>
         ) : (
           // biome-ignore lint/suspicious/noArrayIndexKey: cells are a fixed build-time list with no stable id
-          <CodeCell cell={cell} key={i} />
+          <CodeCell cell={cell} dark={dark} key={i} />
         ),
       )}
     </div>

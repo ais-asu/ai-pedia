@@ -1,7 +1,10 @@
 import type React from "react";
 import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
+import {
+  oneDark,
+  oneLight,
+} from "react-syntax-highlighter/dist/esm/styles/prism";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import rehypeSlug from "rehype-slug";
@@ -13,11 +16,14 @@ import { LazyVisualization } from "./visualizations/LazyVisualization";
 interface MarkdownRendererProps {
   content: string;
   className?: string;
+  /** Highlight code for a dark surface (the map's reading panel). */
+  dark?: boolean;
 }
 
 const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   content,
   className = "",
+  dark = false,
 }) => {
   return (
     <div className={`markdown-content ${className}`}>
@@ -108,7 +114,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                 <div className="markdown-code-block" data-language={language}>
                   <SyntaxHighlighter
                     language={language}
-                    style={oneLight}
+                    style={dark ? oneDark : oneLight}
                     showLineNumbers={true}
                     customStyle={{
                       margin: 0,

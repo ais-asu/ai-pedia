@@ -34,6 +34,35 @@
   color-scheme: light;
 }
 
+/*
+ * The map's "deep-space neural" theme. Anything under [data-theme="space"] —
+ * the map, the header over it and the search palette opened from it — takes
+ * these tokens instead, so every utility and component that reads a token
+ * turns dark with no changes of its own. Article pages keep the light theme.
+ */
+[data-theme="space"] {
+  --background: #061128;
+  --surface: #0b1a3a;
+  --surface-2: #11244d;
+  --line: #1b3163;
+
+  --foreground: #e6f4ff;
+  --ink-2: #b8d2ee;
+  --muted: #7d98bd;
+
+  /* the accent turns from lavender to cyan */
+  --purple: #6fd6ff;
+  --purple-light: #4d8dff;
+  --purple-deep: #8fe3ff;
+  --purple-wash: #0f2856;
+
+  --font-display: var(--font-grotesk);
+  --font-body: var(--font-grotesk);
+  --font-geist-mono: var(--font-jetbrains);
+
+  color-scheme: dark;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-surface: var(--surface);
@@ -55,6 +84,10 @@
 @layer base {
   * {
     box-sizing: border-box;
+  }
+
+  [data-theme="space"] {
+    font-family: var(--font-grotesk), system-ui, sans-serif;
   }
 
   html {
