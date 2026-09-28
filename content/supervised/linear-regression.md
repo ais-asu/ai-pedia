@@ -283,7 +283,7 @@ Linear regression's simplicity is a feature, not a bug, and it serves as a found
       * **Ridge ($L2$):** Adds a penalty proportional to the *square* of the coefficients ($\alpha \sum \beta_j^2$). It shrinks coefficients but rarely to zero.
       * **Lasso ($L1$):** Adds a penalty proportional to the *absolute value* of the coefficients ($\alpha \sum |\beta_j|$). It can shrink "unimportant" feature coefficients all the way to zero, effectively performing automatic **feature selection**.
 
-<div id="VZ-interactive-demo" data-placeholder="Live Markdown Editor Demo"></div>
+<div id="VZ-interactive-demo" data-placeholder="Polynomial Features and Regularization"></div>
 
 -----
 
