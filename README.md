@@ -4,6 +4,11 @@ An interactive encyclopedia of artificial intelligence, written and maintained b
 [The AI Society](https://www.ais-asu.com/) at Arizona State University.
 Live at https://ai-pedia.ais-asu.com.
 
+<img width="2531" height="1423" alt="image" src="https://github.com/user-attachments/assets/0f2eeb5e-9b7a-470b-95e5-821c6a86cda0" />
+
+<img width="2109" height="1424" alt="image" src="https://github.com/user-attachments/assets/eb3df076-9a11-476f-9e67-148203410842" />
+
+
 Articles are Markdown (or Jupyter notebook) files in this repository. There is no
 database, no CMS and no login. To add or fix an article, you open a pull request.
 
