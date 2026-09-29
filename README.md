@@ -13,7 +13,9 @@ Articles are Markdown (or Jupyter notebook) files in this repository. There is n
 database, no CMS and no login. To add or fix an article, you open a pull request.
 
 - Writing or editing an article: read [CONTRIBUTING.md](CONTRIBUTING.md).
-- Changing the site itself, or taking over maintenance: read on.
+- Changing the site itself, or taking over maintenance: read on, then
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- What to build next: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Run it locally
 
@@ -31,7 +33,7 @@ No environment variables are needed locally. `.env.example` lists the optional o
 | Command | What it does |
 |---|---|
 | `npm run dev` | Dev server with hot reload |
-| `npm run build` | Production build. Prerenders every page and fails on a broken article |
+| `npm run build` | Production build. Prerenders every page. Fails on malformed frontmatter |
 | `npm start` | Serve the production build |
 | `npm run lint` | Biome lint and format check |
 | `npm run format` | Biome format, writes changes |
@@ -105,7 +107,7 @@ lib/
   graph.ts                  Builds the map's nodes from content
 public/                     Static files; article images in public/images/
 styles/                     markdown.css (articles), graph.css (map)
-docs/                       Source artwork for the map
+docs/                       ARCHITECTURE.md, ROADMAP.md, map source artwork
 ```
 
 ## Maintaining
