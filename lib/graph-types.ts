@@ -7,35 +7,38 @@
  * types and constants without dragging that into the bundle.
  */
 
-export type GraphNodeKind = "root" | "category" | "article" | "heading";
+export type GraphNodeKind = "root" | "category" | "article";
 
 export interface GraphNode {
   id: string;
   kind: GraphNodeKind;
   label: string;
-  /** Small caption under the label, e.g. how many topics a branch holds. */
+  /** Small mono caption under the label: "3 topics", "article". */
   sublabel?: string;
   description?: string;
-  /** Article route, set on article nodes and inherited by heading nodes. */
+  /** ~130 characters of the article, for the hover preview. */
+  snippet?: string;
+  /** Header image for the preview card and panel, when the article has one. */
+  image?: string;
+  /** Article or category route. */
   href?: string;
-  /** Anchor id within the article, on heading nodes. */
-  anchor?: string;
-  parent?: string;
-  /** Tree depth: 0 root, 1 category, 2 article, 3+ heading. */
-  depth: number;
+  /** Id of the category node an article belongs to (a category's own id). */
+  branch?: string;
   x: number;
   y: number;
-  r: number;
+  /** Index into the map palette; a branch and its articles share one. */
+  hue: number;
 }
 
-export interface GraphEdge {
-  from: string;
-  to: string;
-  /** "tree" edges are containment; "ring" edges link sibling categories. */
-  kind: "tree" | "ring";
-}
-
-export interface GraphBounds {
+/** A branch and the region its articles occupy. */
+export interface GraphCluster {
+  /** The category node's id. */
+  id: string;
+  x: number;
+  y: number;
+  /** Distance from the category node to its farthest article. */
+  radius: number;
+  /** Bounding box of the category and its articles, for framing. */
   minX: number;
   minY: number;
   maxX: number;
@@ -44,9 +47,9 @@ export interface GraphBounds {
 
 export interface GraphData {
   nodes: GraphNode[];
-  edges: GraphEdge[];
-  /** Everything, including the deep nodes that only appear when zoomed in. */
-  bounds: GraphBounds;
+  clusters: GraphCluster[];
+  /** Radius of the ring the categories sit on. */
+  ring: number;
 }
 
 export const ROOT_ID = "root";

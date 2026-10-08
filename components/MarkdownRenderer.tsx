@@ -1,29 +1,61 @@
 import type React from "react";
 import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
+import {
+  oneDark,
+  oneLight,
+} from "react-syntax-highlighter/dist/esm/styles/prism";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeSlug from "rehype-slug";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { parseRatio, resolveEmbedSrc } from "@/lib/embeds";
 import { LazyVisualization } from "./visualizations/LazyVisualization";
 
+/**
+ * Articles come from pull requests, so raw HTML in them is sanitized with
+ * GitHub's schema before rendering. On top of that schema the renderer allows
+ * visualization placeholders (`<div id="VZ-..." data-placeholder>`), iframes
+ * (whose `src` is checked again against the allowlist in lib/embeds.ts), and
+ * the math classes remark-math emits. Ids keep their names so VZ- placeholders
+ * and in-page links still resolve.
+ */
+const sanitizeSchema = {
+  ...defaultSchema,
+  clobberPrefix: "",
+  tagNames: [...(defaultSchema.tagNames ?? []), "iframe"],
+  attributes: {
+    ...defaultSchema.attributes,
+    div: [...(defaultSchema.attributes?.div ?? []), "id", "dataPlaceholder"],
+    iframe: ["src", "title", "width", "height", "dataRatio", "dataCaption"],
+    code: [["className", /^language-./, "math-inline", "math-display"]],
+  },
+};
+
 interface MarkdownRendererProps {
   content: string;
   className?: string;
+  /** Highlight code for a dark surface (the map's reading panel). */
+  dark?: boolean;
 }
 
 const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   content,
   className = "",
+  dark = false,
 }) => {
   return (
     <div className={`markdown-content ${className}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeRaw, rehypeKatex, rehypeSlug]}
+        rehypePlugins={[
+          rehypeRaw,
+          [rehypeSanitize, sanitizeSchema],
+          rehypeKatex,
+          rehypeSlug,
+        ]}
         components={{
           h1: ({ children, ...props }) => (
             <h1 className="markdown-heading markdown-h1" {...props}>
@@ -108,7 +140,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                 <div className="markdown-code-block" data-language={language}>
                   <SyntaxHighlighter
                     language={language}
-                    style={oneLight}
+                    style={dark ? oneDark : oneLight}
                     showLineNumbers={true}
                     customStyle={{
                       margin: 0,

@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { MAP_ROUTES } from "@/lib/constants";
 import type { SearchEntry } from "@/lib/content";
 import { cn } from "@/lib/utils";
 import { CommandPalette } from "./command-palette";
@@ -10,6 +12,8 @@ import { PageActionButtons } from "./page-actions";
 /** Hairline top bar: wordmark on the left, spotlight search on the right. */
 export function Navbar({ searchIndex }: { searchIndex: SearchEntry[] }) {
   const [isScrolled, setIsScrolled] = useState(false);
+  // Over the map the bar floats on the dark canvas instead of pushing it down.
+  const overMap = MAP_ROUTES.includes(usePathname());
 
   useEffect(() => {
     const onScroll = () => setIsScrolled(window.scrollY > 8);
@@ -21,9 +25,10 @@ export function Navbar({ searchIndex }: { searchIndex: SearchEntry[] }) {
   return (
     <>
       <header
+        data-theme={overMap ? "space" : undefined}
         className={cn(
           "fixed top-0 left-0 right-0 z-50 h-12 border-b transition-colors duration-200",
-          isScrolled
+          isScrolled && !overMap
             ? "bg-background/90 backdrop-blur border-line"
             : "bg-transparent border-transparent",
         )}
@@ -45,7 +50,7 @@ export function Navbar({ searchIndex }: { searchIndex: SearchEntry[] }) {
           </div>
         </nav>
       </header>
-      <div className="h-12" aria-hidden="true" />
+      {!overMap && <div className="h-12" aria-hidden="true" />}
     </>
   );
 }

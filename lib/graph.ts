@@ -6,52 +6,39 @@ import {
   getArticles,
   getCategories,
 } from "@/lib/content";
-import type {
-  GraphBounds,
-  GraphData,
-  GraphEdge,
-  GraphNode,
-} from "@/lib/graph-types";
+import type { GraphCluster, GraphData, GraphNode } from "@/lib/graph-types";
 import { ROOT_ID } from "@/lib/graph-types";
-import type { Heading } from "@/lib/markdown-utils";
 
 export * from "@/lib/graph-types";
 
 /**
- * Build-time layout for the neural-network view of the library.
+ * Build-time layout for the map of the library.
  *
- * The site's content is a tree — categories hold articles, articles hold
- * headings — so the graph is that same tree drawn as a network: the root is
- * the field itself, and every level fans outward from its parent. Positions
- * are computed here rather than simulated in the browser so that the map is
- * identical on every load and on the server, and so that deep-linking to a
- * node can place the camera before a single frame is painted.
+ * Everything lives in one continuous world space. The core sits at the origin,
+ * the categories ring it, and each category's articles are scattered through
+ * a lobe to either side of it. Nothing is wired together here — on the map,
+ * links form between whichever neurons happen to sit close to each other — so
+ * a branch reads as a region of the network rather than a drawn tree.
  *
- * Coordinates are an arbitrary "world" space; the client scales and translates
- * the whole thing into the viewport.
+ * Positions are computed here rather than simulated in the browser so the map
+ * is identical on every load, and so a deep link can frame its node before
+ * the first frame is painted. Randomness is seeded from each node's id.
  */
 
-/** Radius of each ring, measured from the parent node. */
-const ORBIT = {
-  category: 560,
-  article: 250,
-  heading: 132,
-} as const;
+/** Distance from the core to each category. */
+const RING = 1000;
+/** Nominal radius of a branch; grows gently with its article count. */
+const CLUSTER_BASE = 300;
+/** Articles keep at least this far from one another… */
+const MIN_ARTICLE_GAP = 215;
+/** …and at least this far from their branch's name. */
+const MIN_BRANCH_GAP = 275;
+/** No article strays further than this multiple of the cluster radius. */
+const MAX_REACH = 1.5;
+const RELAX_PASSES = 140;
+const SNIPPET_LENGTH = 130;
 
-/**
- * Categories sit on an ellipse rather than a circle, wider than it is tall, so
- * the ring matches a landscape screen and leaves the middle clear for the
- * title card that stands over the root.
- */
-const RING_ASPECT = 1.45;
-
-/** Drawn radius of a node at each depth; deeper headings keep shrinking. */
-const NODE_RADIUS = [34, 23, 13, 6.5, 4] as const;
-
-/** Headings are only interesting a couple of levels down. */
-const MAX_HEADING_DEPTH = 2;
-
-/** Deterministic hash → seed, so a node's jitter never depends on ordering. */
+/** FNV-1a string hash → 32-bit seed. */
 function hash(str: string): number {
   let h = 2166136261;
   for (let i = 0; i < str.length; i++) {
@@ -61,205 +48,185 @@ function hash(str: string): number {
   return h >>> 0;
 }
 
-/** Stable pseudo-random value in [-1, 1] for a given node and channel. */
-function jitter(id: string, channel: string): number {
-  const seed = hash(`${id}:${channel}`);
-  return (seed / 0xffffffff) * 2 - 1;
+/** mulberry32: a tiny seeded PRNG, so layout never depends on load order. */
+function prng(seed: number): () => number {
+  let a = seed;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
-function radiusFor(depth: number): number {
-  return NODE_RADIUS[Math.min(depth, NODE_RADIUS.length - 1)];
+/** Plain text of a markdown body, for when an article has no description. */
+function plainText(markdown: string): string {
+  return markdown
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/\$\$[\s\S]*?\$\$/g, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/^#{1,6}\s.*$/gm, " ")
+    .replace(/!\[[^\]]*]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]*)]\([^)]*\)/g, "$1")
+    .replace(/[*_`>#|]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function snippetOf(meta: ArticleMeta): string {
+  const source =
+    meta.description ||
+    plainText(getArticle(meta.category, meta.slug)?.content ?? "");
+  if (source.length <= SNIPPET_LENGTH) return source;
+  const cut = source.slice(0, SNIPPET_LENGTH);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${cut.slice(0, lastSpace > 80 ? lastSpace : SNIPPET_LENGTH).trimEnd()}…`;
+}
+
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
 }
 
 /**
- * Fans `count` children around `heading`, returning the angle for index `i`.
- * A lone child sits straight out from its parent; a crowd wraps into an arc
- * that widens with the count but never doubles back on the parent.
+ * Scatters a branch's articles through two lobes, one either side of the
+ * branch name, then relaxes them until they keep their distance from each
+ * other and from the name without drifting out of the branch.
  */
-function fanAngle(
-  heading: number,
-  i: number,
-  count: number,
-  maxSpread: number,
-  perChild = 0.3,
-): number {
-  if (count <= 1) return heading;
-  const spread = Math.min(maxSpread, 0.55 + count * perChild);
-  return heading - spread / 2 + (spread * i) / (count - 1);
-}
+function placeArticles(
+  branch: GraphNode,
+  articles: ArticleMeta[],
+  radius: number,
+): GraphNode[] {
+  const rand = prng(hash(branch.id));
+  const lobeOffset = radius * 0.95;
+  const lobeSpread = radius * 0.55;
 
-interface Placement {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-}
-
-/** Places a heading and its children recursively, fanning away from `heading`. */
-function placeHeading(
-  out: Placement,
-  parent: GraphNode,
-  headingNode: Heading,
-  index: number,
-  siblings: number,
-  outward: number,
-  depth: number,
-  href: string,
-): void {
-  const id = `${parent.id}#${headingNode.id}`;
-  // Section labels are long, so siblings get a wider arc than articles do.
-  const angle = fanAngle(outward, index, siblings, Math.PI * 1.15, 0.45);
-  const wobble = jitter(id, "angle") * 0.1;
-  const distance = ORBIT.heading * (1 + jitter(id, "dist") * 0.18);
-  const theta = angle + wobble;
-
-  const node: GraphNode = {
-    id,
-    kind: "heading",
-    label: headingNode.text,
-    href,
-    anchor: headingNode.id,
-    parent: parent.id,
-    depth,
-    x: parent.x + Math.cos(theta) * distance,
-    y: parent.y + Math.sin(theta) * distance,
-    r: radiusFor(depth),
-  };
-  out.nodes.push(node);
-  out.edges.push({ from: parent.id, to: node.id, kind: "tree" });
-
-  if (depth - 2 >= MAX_HEADING_DEPTH) return;
-  const children = headingNode.children;
-  children.forEach((child, i) => {
-    placeHeading(out, node, child, i, children.length, theta, depth + 1, href);
+  const nodes = articles.map((meta, i): GraphNode => {
+    const side = i % 2 === 0 ? -1 : 1;
+    const angle = rand() * Math.PI * 2;
+    const dist = Math.sqrt(rand()) * lobeSpread;
+    return {
+      id: `article:${meta.category}/${meta.slug}`,
+      kind: "article",
+      label: meta.title,
+      sublabel: "article",
+      description: meta.description || undefined,
+      snippet: snippetOf(meta) || undefined,
+      image: meta.thumbnail,
+      href: `/learn/${meta.category}/${meta.slug}`,
+      branch: branch.id,
+      x: branch.x + side * lobeOffset + Math.cos(angle) * dist,
+      y: branch.y + Math.sin(angle) * dist * 0.8,
+      hue: branch.hue,
+    };
   });
-}
 
-function placeArticle(
-  out: Placement,
-  category: GraphNode,
-  meta: ArticleMeta,
-  index: number,
-  siblings: number,
-  outward: number,
-): void {
-  const id = `article:${meta.category}/${meta.slug}`;
-  const href = `/learn/${meta.category}/${meta.slug}`;
-  const angle = fanAngle(outward, index, siblings, Math.PI * 1.1);
-  const wobble = jitter(id, "angle") * 0.09;
-  const distance = ORBIT.article * (1 + jitter(id, "dist") * 0.22);
-  const theta = angle + wobble;
-
-  const node: GraphNode = {
-    id,
-    kind: "article",
-    label: meta.title,
-    description: meta.description || undefined,
-    href,
-    parent: category.id,
-    depth: 2,
-    x: category.x + Math.cos(theta) * distance,
-    y: category.y + Math.sin(theta) * distance,
-    r: radiusFor(2),
-  };
-  out.nodes.push(node);
-  out.edges.push({ from: category.id, to: node.id, kind: "tree" });
-
-  const article = getArticle(meta.category, meta.slug);
-  let headings = article?.headings ?? [];
-  // Most articles open with an H1 that repeats their title. As a node it would
-  // sit on top of the article's own label and push every real section a level
-  // deeper, so its sections are promoted in its place.
-  if (headings.length === 1 && headings[0].level === 1) {
-    headings = headings[0].children;
+  const reach = radius * MAX_REACH;
+  for (let pass = 0; pass < RELAX_PASSES; pass++) {
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i];
+        const b = nodes[j];
+        let dx = b.x - a.x;
+        let dy = b.y - a.y;
+        let d = Math.hypot(dx, dy);
+        if (d >= MIN_ARTICLE_GAP) continue;
+        if (d < 1e-3) {
+          // Coincident points: split them along a seeded direction.
+          const t = rand() * Math.PI * 2;
+          dx = Math.cos(t);
+          dy = Math.sin(t);
+          d = 1;
+        }
+        const push = (MIN_ARTICLE_GAP - d) / 2;
+        a.x -= (dx / d) * push;
+        a.y -= (dy / d) * push;
+        b.x += (dx / d) * push;
+        b.y += (dy / d) * push;
+      }
+    }
+    for (const n of nodes) {
+      const dx = n.x - branch.x;
+      const dy = n.y - branch.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const clamped = Math.min(Math.max(d, MIN_BRANCH_GAP), reach);
+      n.x = branch.x + (dx / d) * clamped;
+      n.y = branch.y + (dy / d) * clamped;
+    }
   }
-  headings.forEach((h, i) => {
-    placeHeading(out, node, h, i, headings.length, theta, 3, href);
-  });
+  return nodes;
+}
+
+function clusterOf(branch: GraphNode, articles: GraphNode[]): GraphCluster {
+  let radius = MIN_BRANCH_GAP;
+  let minX = branch.x;
+  let minY = branch.y;
+  let maxX = branch.x;
+  let maxY = branch.y;
+  for (const a of articles) {
+    radius = Math.max(radius, Math.hypot(a.x - branch.x, a.y - branch.y));
+    minX = Math.min(minX, a.x);
+    minY = Math.min(minY, a.y);
+    maxX = Math.max(maxX, a.x);
+    maxY = Math.max(maxY, a.y);
+  }
+  return {
+    id: branch.id,
+    x: branch.x,
+    y: branch.y,
+    radius,
+    minX,
+    minY,
+    maxX,
+    maxY,
+  };
 }
 
 function placeCategory(
-  out: Placement,
-  root: GraphNode,
   category: Category,
   index: number,
   siblings: number,
-): GraphNode {
+): { branch: GraphNode; articles: GraphNode[]; cluster: GraphCluster } {
   const id = `category:${category.slug}`;
-  // Categories ring the root evenly, turned half a step off the vertical so
-  // none of them sits directly above or below the title card.
-  const step = (Math.PI * 2) / Math.max(siblings, 1);
-  const angle = -Math.PI / 2 + step / 2 + step * index;
-  const theta = angle + jitter(id, "angle") * 0.07;
-  const distance = ORBIT.category * (1 + jitter(id, "dist") * 0.14);
-
-  const node: GraphNode = {
+  // Categories ring the core evenly, starting at the top.
+  const angle = -Math.PI / 2 + (Math.PI * 2 * index) / Math.max(siblings, 1);
+  const metas = getArticles(category.slug);
+  const branch: GraphNode = {
     id,
     kind: "category",
     label: category.title,
+    sublabel: plural(metas.length, "topic", "topics"),
     description: category.description || undefined,
     href: `/learn/${category.slug}`,
-    parent: root.id,
-    depth: 1,
-    x: root.x + Math.cos(theta) * distance * RING_ASPECT,
-    y: root.y + Math.sin(theta) * distance,
-    r: radiusFor(1),
+    branch: id,
+    x: Math.cos(angle) * RING,
+    y: Math.sin(angle) * RING,
+    hue: index,
   };
-  const articles = getArticles(category.slug);
-  node.sublabel =
-    articles.length === 1 ? "1 topic" : `${articles.length} topics`;
-
-  out.nodes.push(node);
-  out.edges.push({ from: root.id, to: node.id, kind: "tree" });
-
-  articles.forEach((meta, i) => {
-    placeArticle(out, node, meta, i, articles.length, theta);
-  });
-
-  return node;
-}
-
-function boundsOf(nodes: GraphNode[]): GraphBounds {
-  if (nodes.length === 0) return { minX: -1, minY: -1, maxX: 1, maxY: 1 };
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const n of nodes) {
-    minX = Math.min(minX, n.x - n.r);
-    minY = Math.min(minY, n.y - n.r);
-    maxX = Math.max(maxX, n.x + n.r);
-    maxY = Math.max(maxY, n.y + n.r);
-  }
-  return { minX, minY, maxX, maxY };
+  const radius = CLUSTER_BASE + 26 * Math.sqrt(metas.length);
+  const articles = placeArticles(branch, metas, radius);
+  return { branch, articles, cluster: clusterOf(branch, articles) };
 }
 
 export const getGraph = cache((): GraphData => {
+  const categories = getCategories();
   const root: GraphNode = {
     id: ROOT_ID,
     kind: "root",
     label: "AI Pedia",
-    depth: 0,
+    sublabel: `${plural(categories.length, "branch", "branches")} · click to fly in`,
     x: 0,
     y: 0,
-    r: radiusFor(0),
+    hue: 0,
   };
 
-  const out: Placement = { nodes: [root], edges: [] };
-  const categories = getCategories();
-  const categoryNodes = categories.map((c, i) =>
-    placeCategory(out, root, c, i, categories.length),
-  );
+  const nodes: GraphNode[] = [root];
+  const clusters: GraphCluster[] = [];
+  categories.forEach((category, i) => {
+    const placed = placeCategory(category, i, categories.length);
+    nodes.push(placed.branch, ...placed.articles);
+    clusters.push(placed.cluster);
+  });
 
-  // Faint edges around the ring of categories, so the overview reads as a
-  // network rather than a plain star.
-  for (let i = 0; i < categoryNodes.length; i++) {
-    const next = categoryNodes[(i + 1) % categoryNodes.length];
-    if (next.id === categoryNodes[i].id) continue;
-    out.edges.push({ from: categoryNodes[i].id, to: next.id, kind: "ring" });
-  }
-
-  return {
-    nodes: out.nodes,
-    edges: out.edges,
-    bounds: boundsOf(out.nodes),
-  };
+  return { nodes, clusters, ring: RING };
 });

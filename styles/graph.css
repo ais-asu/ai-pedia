@@ -1,294 +1,276 @@
 /*
- * The map of the field: an ink-on-paper network drawn over the same tokens as
- * the rest of the site.
- *
- * Two visual channels are kept apart on purpose, because both animate:
- *   - `opacity` belongs to level-of-detail. The camera writes `data-zoom` on
- *     the <svg>, and each depth fades in when the zoom reaches it.
- *   - `stroke-opacity` / `fill-opacity` belong to highlighting, so lighting a
- *     lineage never fights with whatever the zoom level is doing.
+ * The map: a deep-space neural network. The canvas draws the neurons, links,
+ * signals and pools of light; everything here is the DOM laid over it —
+ * floating labels, the core title, the hover preview, the reading panel and
+ * the tweaks drawer. Colours come from the [data-theme="space"] tokens.
  */
 
-.ngraph {
-  cursor: grab;
-  transition: opacity 0.4s ease;
+.nmap-backdrop {
+  background: radial-gradient(
+    ellipse at 50% 50%,
+    #0b1a3a 0%,
+    #061128 48%,
+    #03060f 100%
+  );
 }
 
-.ngraph:active {
+.nmap {
+  transition: opacity 0.5s ease;
+}
+
+.nmap > div:first-child {
+  cursor: grab;
+}
+
+.nmap > div:first-child:active {
   cursor: grabbing;
 }
 
-/* ---------------------------------------------------------- level of detail */
-
-.ngraph [data-depth="2"],
-.ngraph [data-depth="3"],
-.ngraph [data-depth="4"] {
-  opacity: 0;
-  pointer-events: none;
-  transition:
-    opacity 0.45s ease,
-    stroke-opacity 0.25s ease;
+.nmap-meta {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 0.64rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
-.ngraph[data-zoom="1"] [data-depth="2"],
-.ngraph[data-zoom="2"] [data-depth="2"],
-.ngraph[data-zoom="2"] [data-depth="3"],
-.ngraph[data-zoom="2"] [data-depth="4"] {
-  opacity: 1;
-  pointer-events: auto;
-}
+/* ------------------------------------------------------------------- labels */
 
-/* ------------------------------------------------------------------- edges */
-
-/* Structural edges are drawn in ink, not in the hairline grey the ambient mesh
-   uses, so the real shape of the library stays legible over the field. */
-.ngraph-edges path {
-  fill: none;
-  stroke: var(--muted);
-  stroke-width: 1.25;
-  stroke-opacity: 0.45;
-  vector-effect: non-scaling-stroke;
-  transition:
-    stroke 0.25s ease,
-    stroke-opacity 0.25s ease;
-}
-
-/* Ring links between categories belong to the overview, not to any depth, so
-   they opt back out of the level-of-detail fade above. */
-.ngraph-edges path[data-kind="ring"] {
-  opacity: 1;
-  stroke-dasharray: 2 9;
-  stroke-opacity: 0.3;
-}
-
-.ngraph-edges path[data-lit="true"] {
-  stroke: var(--purple);
-  stroke-opacity: 1;
-}
-
-.ngraph[data-dimmed="true"] .ngraph-edges path:not([data-lit="true"]) {
-  stroke-opacity: 0.4;
-}
-
-/* ------------------------------------------------------------------- nodes */
-
-.ngraph-halo-in {
-  stop-color: var(--background);
-  stop-opacity: 0.92;
-}
-
-.ngraph-halo-out {
-  stop-color: var(--background);
-  stop-opacity: 0;
-}
-
-/* Only the hit circle takes pointer events; everything drawn on top of it —
-   the dot itself included — would otherwise swallow the click. */
-.ngraph-halo,
-.ngraph-dot,
-.ngraph-label,
-.ngraph-sublabel {
-  pointer-events: none;
-}
-
-.ngraph-hit {
-  fill: transparent;
+/* A padded block centred on its neuron: the dot sits 18px down from the top
+   (the canvas draws it), and the name floats beneath. The camera writes the
+   transform each frame; transform-origin is the dot, so scaling keeps the
+   block anchored to it. */
+.nmap-label {
+  position: absolute;
+  top: -18px;
+  left: -89px;
+  padding: 0 6px 10px;
+  transform-origin: 89px 18px;
+  will-change: transform, opacity;
+  text-align: center;
   cursor: pointer;
+  background: none;
+  border: 0;
 }
 
-.ngraph-dot {
-  fill: var(--foreground);
-  transition:
-    fill 0.25s ease,
-    fill-opacity 0.25s ease,
-    stroke 0.25s ease;
+.nmap-label-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 32px;
+  transition: transform 0.25s ease;
 }
 
-.ngraph [data-kind="root"] .ngraph-dot,
-.ngraph [data-kind="category"] .ngraph-dot {
-  fill: var(--background);
-  stroke: var(--foreground);
-  stroke-width: 1.5;
-  vector-effect: non-scaling-stroke;
+.nmap-label-name {
+  font-family: var(--font-grotesk), system-ui, sans-serif;
+  font-weight: 500;
+  line-height: 1.2;
+  color: #e6f4ff;
+  text-shadow:
+    0 0 10px rgb(111 214 255 / 0.35),
+    0 0 2px rgb(3 6 15 / 0.9);
+  transition: text-shadow 0.25s ease;
 }
 
-.ngraph [data-kind="heading"] .ngraph-dot {
-  fill: var(--muted);
+.nmap-label[data-kind="category"] .nmap-label-name {
+  font-size: 0.98rem;
 }
 
-.ngraph [data-lit="true"] .ngraph-dot {
-  fill: var(--purple-deep);
-  stroke: var(--purple-deep);
+.nmap-label[data-kind="article"] .nmap-label-name {
+  font-size: 0.8rem;
+  color: #cfe6ff;
 }
 
-.ngraph [data-active="true"] .ngraph-dot {
-  fill: var(--purple-deep);
-  stroke: var(--purple-deep);
+.nmap-label-meta {
+  margin-top: 4px;
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 0.55rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgb(143 227 255 / 0.55);
 }
 
-/* A soft wash marks the node whose article the panel is showing. */
-.ngraph [data-active="true"] .ngraph-hit {
-  fill: var(--purple-wash);
-  fill-opacity: 0.55;
+.nmap-label[data-active="true"] .nmap-label-name,
+.nmap-label[data-open="true"] .nmap-label-name {
+  text-shadow:
+    0 0 14px rgb(111 214 255 / 0.6),
+    0 0 2px rgb(3 6 15 / 0.9);
 }
 
-/* ------------------------------------------------------------------ labels */
-
-.ngraph-label {
-  fill: var(--ink-2);
-  text-anchor: middle;
-  font-family: var(--font-display), Georgia, "Times New Roman", serif;
-  paint-order: stroke;
-  stroke: var(--background);
-  stroke-width: 4px;
-  stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
-  transition:
-    fill 0.25s ease,
-    fill-opacity 0.25s ease;
+.nmap-label:hover .nmap-label-inner,
+.nmap-label:focus-visible .nmap-label-inner {
+  transform: scale(1.07);
 }
 
-.ngraph-sublabel {
-  fill: var(--muted);
-  text-anchor: middle;
-  font-family: var(--font-body), Georgia, serif;
-  paint-order: stroke;
-  stroke: var(--background);
-  stroke-width: 3px;
-  stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
-  transition: fill-opacity 0.25s ease;
+.nmap-label:hover .nmap-label-name {
+  color: #ffffff;
+  text-shadow:
+    0 0 18px rgb(143 227 255 / 0.85),
+    0 0 4px rgb(111 214 255 / 0.7);
 }
 
-.ngraph[data-zoom="2"] .ngraph-sublabel {
-  fill-opacity: 0;
-}
+/* --------------------------------------------------------------------- core */
 
-.ngraph [data-kind="heading"] .ngraph-label {
-  fill: var(--muted);
-}
-
-.ngraph [data-lit="true"] .ngraph-label,
-.ngraph [data-active="true"] .ngraph-label {
-  fill: var(--purple-deep);
-}
-
-.ngraph[data-dimmed="true"]
-  .ngraph-nodes
-  > g:not([data-lit="true"])
-  .ngraph-label,
-.ngraph[data-dimmed="true"]
-  .ngraph-nodes
-  > g:not([data-lit="true"])
-  .ngraph-dot {
-  fill-opacity: 0.32;
-}
-
-/* Once you are reading inside a cluster, the outer names are just noise. */
-.ngraph[data-zoom="1"] [data-kind="root"] .ngraph-label {
-  fill-opacity: 0.4;
-}
-
-.ngraph[data-zoom="2"] [data-kind="root"] .ngraph-label,
-.ngraph[data-zoom="2"] [data-kind="category"] .ngraph-label {
-  fill-opacity: 0;
-}
-
-/* The root is drawn by the title card that stands over it (see map-hero.tsx);
-   in the SVG it is only a click target and the point the branches meet. */
-.ngraph [data-kind="root"] .ngraph-dot,
-.ngraph [data-kind="root"] .ngraph-label,
-.ngraph [data-kind="root"] .ngraph-sublabel {
-  display: none;
-}
-
-/* -------------------------------------------------------------------- hero */
-
-.ngraph-hero {
+.nmap-core {
   position: absolute;
   top: 0;
   left: 0;
-  will-change: transform, opacity;
-  transform-origin: 0 0;
-}
-
-/* A pool of clean paper under the title, so the branches and the mesh fade
-   out as they reach it instead of running through the type. */
-.ngraph-hero-vignette {
-  position: absolute;
-  inset: -48% -38%;
-  background: radial-gradient(
-    closest-side,
-    var(--background) 0%,
-    var(--background) 52%,
-    color-mix(in oklab, var(--background) 78%, transparent) 72%,
-    transparent 100%
-  );
-}
-
-/* A faint lavender bloom behind the wordmark — the one warm spot on the map. */
-.ngraph-hero-glow {
-  position: absolute;
-  top: 30%;
-  left: 50%;
-  width: 420px;
-  height: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   translate: -50% -50%;
-  border-radius: 50%;
-  background: radial-gradient(
-    closest-side,
-    color-mix(in oklab, var(--purple-light) 45%, transparent),
-    transparent
-  );
-  filter: blur(18px);
+  transform-origin: 0 0;
+  will-change: transform, opacity;
+  background: none;
+  border: 0;
+  cursor: pointer;
 }
 
-/* Darkens the edges of the map a touch, which pulls the eye to the middle. */
-.ngraph-edge-vignette {
+.nmap-core-title {
+  font-family: var(--font-grotesk), system-ui, sans-serif;
+  font-size: clamp(1.9rem, 5.4vw, 4.4rem);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  color: #e6f4ff;
+  text-shadow:
+    0 0 24px rgb(111 214 255 / 0.55),
+    0 0 60px rgb(77 141 255 / 0.35);
+}
+
+.nmap-core-meta {
+  margin-top: 14px;
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: rgb(168 204 255 / 0.7);
+}
+
+/* ------------------------------------------------------------------ preview */
+
+.nmap-preview {
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
+  z-index: 20;
+  overflow: hidden;
   pointer-events: none;
-  background: radial-gradient(
-    ellipse 75% 70% at 50% 50%,
-    transparent 55%,
-    color-mix(in oklab, var(--surface-2) 75%, transparent) 100%
-  );
+  border: 1px solid rgb(111 214 255 / 0.18);
+  border-radius: 12px;
+  background: rgb(6 17 40 / 0.82);
+  backdrop-filter: blur(14px);
+  box-shadow:
+    0 18px 50px -20px rgb(0 0 0 / 0.8),
+    0 0 30px -12px rgb(111 214 255 / 0.35);
+  transition: opacity 0.18s ease;
+}
+
+.nmap-placeholder {
+  background:
+    radial-gradient(
+      circle at 30% 40%,
+      color-mix(in oklab, var(--hue) 55%, transparent),
+      transparent 55%
+    ),
+    radial-gradient(
+      circle at 75% 70%,
+      color-mix(in oklab, var(--hue) 30%, transparent),
+      transparent 50%
+    ), linear-gradient(135deg, #0b1a3a, #03060f);
+}
+
+/* -------------------------------------------------------------------- panel */
+
+.nmap-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+  padding-top: 48px; /* the header floats over the top of the map */
+  border-left: 1px solid rgb(111 214 255 / 0.14);
+  background: rgb(6 17 40 / 0.72);
+  backdrop-filter: blur(20px) saturate(1.2);
+  box-shadow: -30px 0 70px -30px rgb(0 0 0 / 0.8);
+  transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  outline: none;
+}
+
+.nmap-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  padding: 0.45rem;
+  color: var(--muted);
+  transition:
+    color 0.2s ease,
+    background 0.2s ease;
+}
+
+.nmap-icon-btn:hover {
+  color: var(--foreground);
+  background: rgb(111 214 255 / 0.1);
+}
+
+.nmap-primary {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  border: 1px solid rgb(111 214 255 / 0.45);
+  background: rgb(111 214 255 / 0.12);
+  padding: 0.55rem 1.2rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #e6f4ff;
+  box-shadow: 0 0 22px -8px rgb(111 214 255 / 0.7);
+  transition:
+    background 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.nmap-primary:hover {
+  background: rgb(111 214 255 / 0.22);
+  box-shadow: 0 0 28px -6px rgb(111 214 255 / 0.9);
+}
+
+.nmap-related {
+  display: block;
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid rgb(111 214 255 / 0.12);
+  padding: 0.8rem 1rem;
+  text-align: left;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease;
+}
+
+.nmap-related:hover {
+  border-color: rgb(111 214 255 / 0.35);
+  background: rgb(111 214 255 / 0.06);
+}
+
+.nmap-article .markdown-content {
+  font-size: 0.95rem;
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .ngraph-hero-glow {
-    animation: ngraph-breathe 7s ease-in-out infinite;
+  .nmap-panel {
+    animation: nmap-panel-in 0.42s cubic-bezier(0.22, 1, 0.36, 1);
   }
 }
 
-@keyframes ngraph-breathe {
-  50% {
-    opacity: 0.55;
-    scale: 1.08;
-  }
-}
-
-/* ------------------------------------------------------------------- panel */
-
-.ngraph-panel {
-  box-shadow: -28px 0 64px -34px rgb(25 25 24 / 0.35);
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .ngraph-panel {
-    animation: ngraph-panel-in 0.42s cubic-bezier(0.22, 1, 0.36, 1);
-  }
-
-  .ngraph-edges path[data-lit="true"] {
-    stroke-dasharray: 3 9;
-    animation: ngraph-signal 1.4s linear infinite;
-  }
-}
-
-@keyframes ngraph-panel-in {
+@keyframes nmap-panel-in {
   from {
     opacity: 0;
-    transform: translateX(2.5%);
+    transform: translateX(4%);
   }
   to {
     opacity: 1;
@@ -296,8 +278,53 @@
   }
 }
 
-@keyframes ngraph-signal {
-  to {
-    stroke-dashoffset: -24;
-  }
+/* ------------------------------------------------------------------- tweaks */
+
+.nmap-tweaks {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.nmap-tweaks-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border-radius: 9999px;
+  border: 1px solid rgb(111 214 255 / 0.18);
+  background: rgb(6 17 40 / 0.6);
+  backdrop-filter: blur(10px);
+  padding: 0.4rem 0.85rem;
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+  transition: color 0.2s ease;
+}
+
+.nmap-tweaks-toggle:hover {
+  color: var(--foreground);
+}
+
+.nmap-tweaks-body {
+  width: 230px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border-radius: 12px;
+  border: 1px solid rgb(111 214 255 / 0.16);
+  background: rgb(6 17 40 / 0.78);
+  backdrop-filter: blur(14px);
+  padding: 14px 16px;
+}
+
+.nmap-range {
+  width: 100%;
+  accent-color: #6fd6ff;
 }
